@@ -36,7 +36,7 @@ class EpicSettings(AgentConfig):
     )
     
     GEMINI_MODEL: str = Field(
-        default=os.getenv("GEMINI_MODEL", "gemini-2.5-pro"),
+        default=os.getenv("GEMINI_MODEL", "gemini-3.1-flash-lite-preview"),
         description="模型名称",
     )
 
