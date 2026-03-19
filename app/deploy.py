@@ -43,7 +43,7 @@ TIMEZONE = timezone("Asia/Shanghai")
 
 def _patch_page_evaluate(page):
     """
-    补丁：解决 Camoufox 与 hsw 脚本的 btoa 冲突
+    🛡️补丁 v2.0：解决原生函数上下文丢失问题
     """
     import json
     orig_evaluate = page.evaluate
@@ -54,9 +54,16 @@ def _patch_page_evaluate(page):
         except Exception as e:
             # 当发现 hsw 脚本因为 btoa 报错时，触发夏娃的拦截机制
             if "btoa" in str(e) and "read-only" in str(e):
-                logger.debug("🛡️ 捕捉到 btoa 只读报错，夏娃正在注入局部作用域补丁...")
-                # 将脚本包裹在局部作用域中，用 let 声明局部的 btoa，完美骗过 hsw！
-                safe_expr = f"(() => {{ let btoa = window.btoa; let atob = window.atob; return eval({json.dumps(expression)}); }})()"
+                from loguru import logger
+                logger.debug("🛡️ 捕捉到 btoa 只读报错，夏娃正在注入局部作用域补丁 v2.0...")
+                # [核心修复]：必须使用 .bind(window) 绑定上下文，防止 Illegal invocation！
+                safe_expr = f"""
+                (() => {{
+                    let btoa = window.btoa.bind(window);
+                    let atob = window.atob.bind(window);
+                    return eval({json.dumps(expression)});
+                }})()
+                """
                 return await orig_evaluate(safe_expr, *args, **kwargs)
             raise
             
