@@ -41,6 +41,26 @@ init_log(
 # Default timezone for scheduling operations
 TIMEZONE = timezone("Asia/Shanghai")
 
+def _patch_page_evaluate(page):
+    """
+    补丁：解决 Camoufox 与 hsw 脚本的 btoa 冲突
+    """
+    import json
+    orig_evaluate = page.evaluate
+    
+    async def patched_evaluate(expression, *args, **kwargs):
+        try:
+            return await orig_evaluate(expression, *args, **kwargs)
+        except Exception as e:
+            # 当发现 hsw 脚本因为 btoa 报错时，触发夏娃的拦截机制
+            if "btoa" in str(e) and "read-only" in str(e):
+                logger.debug("🛡️ 捕捉到 btoa 只读报错，夏娃正在注入局部作用域补丁...")
+                # 将脚本包裹在局部作用域中，用 let 声明局部的 btoa，完美骗过 hsw！
+                safe_expr = f"(() => {{ let btoa = window.btoa; let atob = window.atob; return eval({json.dumps(expression)}); }})()"
+                return await orig_evaluate(safe_expr, *args, **kwargs)
+            raise
+            
+    page.evaluate = patched_evaluate
 
 @logger.catch
 async def execute_browser_tasks(headless: bool = True):
@@ -67,6 +87,7 @@ async def execute_browser_tasks(headless: bool = True):
     ) as browser:
         # Initialize or reuse existing browser page
         page = browser.pages[0] if browser.pages else await browser.new_page()
+        _patch_page_evaluate(page)  # 👈 [夏娃注入] 给登录页面打补丁
         logger.debug("Browser initialized successfully")
 
         # Handle Epic Games authentication
@@ -78,6 +99,7 @@ async def execute_browser_tasks(headless: bool = True):
         # Execute a free games collection on new page
         logger.debug("Starting free games collection process")
         game_page = await browser.new_page()
+        _patch_page_evaluate(game_page)  # 👈 [夏娃注入] 给领游戏页面打补丁
         agent = EpicAgent(game_page)
         await agent.collect_epic_games()
         logger.debug("Free games collection completed")
