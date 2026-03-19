@@ -131,7 +131,7 @@ def _apply_aihubmix_patch():
                 
                 # [核心修复点] 强制使用关键字参数 model= 和 contents=
                 # 这解决了 "takes 1 positional argument but 3 were given" 的报错
-                return await orig_generate(self_models, model=model, contents=normalized, **kwargs)
+                return await orig_generate(self_models, model=settings.GEMINI_MODEL, contents=normalized, **kwargs)
 
             genai.files.AsyncFiles.upload = patched_upload
             genai.models.AsyncModels.generate_content = patched_generate
