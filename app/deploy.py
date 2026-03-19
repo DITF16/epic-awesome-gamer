@@ -43,28 +43,56 @@ TIMEZONE = timezone("Asia/Shanghai")
 
 def _patch_page_evaluate(page):
     """
-    🛡️补丁 v2.0：解决原生函数上下文丢失问题
+    🛡️ 虚拟沙盒补丁 v3.0：彻底隔离 hsw.js 的全局污染
     """
     import json
+    from loguru import logger
     orig_evaluate = page.evaluate
     
     async def patched_evaluate(expression, *args, **kwargs):
         try:
             return await orig_evaluate(expression, *args, **kwargs)
         except Exception as e:
-            # 当发现 hsw 脚本因为 btoa 报错时，触发夏娃的拦截机制
             if "btoa" in str(e) and "read-only" in str(e):
-                from loguru import logger
-                logger.debug("🛡️ 捕捉到 btoa 只读报错，夏娃正在注入局部作用域补丁 v2.0...")
-                # [核心修复]：必须使用 .bind(window) 绑定上下文，防止 Illegal invocation！
-                safe_expr = f"""
+                logger.debug("🛡️ 捕捉到 btoa 只读报错，夏娃正在启动 Proxy 虚拟沙盒 v3.0...")
+                
+                # [核心黑科技]：构建 Proxy 代理，拦截并中和所有对 btoa/atob 的攻击
+                sandbox_expr = f"""
                 (() => {{
-                    let btoa = window.btoa.bind(window);
-                    let atob = window.atob.bind(window);
-                    return eval({json.dumps(expression)});
+                    const handler = {{
+                        set: function(target, prop, value) {{
+                            // 核心拦截：如果是 btoa 或 atob，直接吞掉赋值操作，返回 true 假装成功
+                            if (prop === 'btoa' || prop === 'atob') return true;
+                            target[prop] = value;
+                            return true;
+                        }},
+                        get: function(target, prop) {{
+                            // 欺骗战术：当脚本请求 window/self 时，返回我们的 Proxy 替身
+                            if (prop === 'window' || prop === 'self' || prop === 'globalThis') return proxy;
+                            // 绑定上下文，防止原生函数报 Illegal Invocation
+                            if (prop === 'btoa' || prop === 'atob') {{
+                                return typeof target[prop] === 'function' ? target[prop].bind(target) : target[prop];
+                            }}
+                            return target[prop];
+                        }},
+                        defineProperty: function(target, prop, descriptor) {{
+                            // 拦截 Object.defineProperty(window, 'btoa', ...) 的硬核修改
+                            if (prop === 'btoa' || prop === 'atob') return true;
+                            return Reflect.defineProperty(target, prop, descriptor);
+                        }}
+                    }};
+                    
+                    const proxy = new Proxy(window, handler);
+                    
+                    // 使用 with 语句和 .call 强制改变作用域和 this 指向，把它彻底关在沙盒里！
+                    return (function(code) {{
+                        with(proxy) {{
+                            return eval(code);
+                        }}
+                    }}).call(proxy, {json.dumps(expression)});
                 }})()
                 """
-                return await orig_evaluate(safe_expr, *args, **kwargs)
+                return await orig_evaluate(sandbox_expr, *args, **kwargs)
             raise
             
     page.evaluate = patched_evaluate
