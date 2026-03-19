@@ -43,7 +43,7 @@ TIMEZONE = timezone("Asia/Shanghai")
 
 def _patch_page_evaluate(page):
     """
-    🛡️ 虚拟沙盒补丁 v3.0：彻底隔离 hsw.js 的全局污染
+    🛡️ 虚拟沙盒补丁 v4.0：完美模拟全局属性复写
     """
     import json
     from loguru import logger
@@ -54,37 +54,50 @@ def _patch_page_evaluate(page):
             return await orig_evaluate(expression, *args, **kwargs)
         except Exception as e:
             if "btoa" in str(e) and "read-only" in str(e):
-                logger.debug("🛡️ 捕捉到 btoa 只读报错，夏娃正在启动 Proxy 虚拟沙盒 v3.0...")
+                logger.debug("🛡️ 捕捉到 btoa 只读报错，夏娃正在启动 Proxy 虚拟沙盒 v4.0...")
                 
-                # [核心黑科技]：构建 Proxy 代理，拦截并中和所有对 btoa/atob 的攻击
+                # [核心黑科技]：构建 Proxy 代理，不仅拦截，还要【保存】它的修改！
                 sandbox_expr = f"""
                 (() => {{
+                    // 专门准备一个小仓库，用来存放 hsw.js 试图修改的只读属性
+                    const customProps = {{}};
+                    
                     const handler = {{
                         set: function(target, prop, value) {{
-                            // 核心拦截：如果是 btoa 或 atob，直接吞掉赋值操作，返回 true 假装成功
-                            if (prop === 'btoa' || prop === 'atob') return true;
+                            // 如果它想修改 btoa/atob，我们不报错，而是偷偷存到小仓库里！
+                            if (prop === 'btoa' || prop === 'atob') {{
+                                customProps[prop] = value;
+                                return true;
+                            }}
                             target[prop] = value;
                             return true;
                         }},
                         get: function(target, prop) {{
-                            // 欺骗战术：当脚本请求 window/self 时，返回我们的 Proxy 替身
                             if (prop === 'window' || prop === 'self' || prop === 'globalThis') return proxy;
-                            // 绑定上下文，防止原生函数报 Illegal Invocation
+                            
                             if (prop === 'btoa' || prop === 'atob') {{
+                                // 如果小仓库里有它自己修改过的版本，就原样还给它！这步极其关键！
+                                if (prop in customProps) {{
+                                    return customProps[prop];
+                                }}
+                                // 否则返回原生的，并绑定上下文防报错
                                 return typeof target[prop] === 'function' ? target[prop].bind(target) : target[prop];
                             }}
                             return target[prop];
                         }},
                         defineProperty: function(target, prop, descriptor) {{
-                            // 拦截 Object.defineProperty(window, 'btoa', ...) 的硬核修改
-                            if (prop === 'btoa' || prop === 'atob') return true;
+                            if (prop === 'btoa' || prop === 'atob') {{
+                                if ('value' in descriptor) {{
+                                    customProps[prop] = descriptor.value;
+                                }}
+                                return true;
+                            }}
                             return Reflect.defineProperty(target, prop, descriptor);
                         }}
                     }};
                     
                     const proxy = new Proxy(window, handler);
                     
-                    // 使用 with 语句和 .call 强制改变作用域和 this 指向，把它彻底关在沙盒里！
                     return (function(code) {{
                         with(proxy) {{
                             return eval(code);
