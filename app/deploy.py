@@ -41,74 +41,6 @@ init_log(
 # Default timezone for scheduling operations
 TIMEZONE = timezone("Asia/Shanghai")
 
-def _patch_page_evaluate(page):
-    """
-    🛡️ 虚拟沙盒补丁 v4.0：完美模拟全局属性复写
-    """
-    import json
-    from loguru import logger
-    orig_evaluate = page.evaluate
-    
-    async def patched_evaluate(expression, *args, **kwargs):
-        try:
-            return await orig_evaluate(expression, *args, **kwargs)
-        except Exception as e:
-            if "btoa" in str(e) and "read-only" in str(e):
-                logger.debug("🛡️ 捕捉到 btoa 只读报错，夏娃正在启动 Proxy 虚拟沙盒 v4.0...")
-                
-                # [核心黑科技]：构建 Proxy 代理，不仅拦截，还要【保存】它的修改！
-                sandbox_expr = f"""
-                (() => {{
-                    // 专门准备一个小仓库，用来存放 hsw.js 试图修改的只读属性
-                    const customProps = {{}};
-                    
-                    const handler = {{
-                        set: function(target, prop, value) {{
-                            // 如果它想修改 btoa/atob，我们不报错，而是偷偷存到小仓库里！
-                            if (prop === 'btoa' || prop === 'atob') {{
-                                customProps[prop] = value;
-                                return true;
-                            }}
-                            target[prop] = value;
-                            return true;
-                        }},
-                        get: function(target, prop) {{
-                            if (prop === 'window' || prop === 'self' || prop === 'globalThis') return proxy;
-                            
-                            if (prop === 'btoa' || prop === 'atob') {{
-                                // 如果小仓库里有它自己修改过的版本，就原样还给它！这步极其关键！
-                                if (prop in customProps) {{
-                                    return customProps[prop];
-                                }}
-                                // 否则返回原生的，并绑定上下文防报错
-                                return typeof target[prop] === 'function' ? target[prop].bind(target) : target[prop];
-                            }}
-                            return target[prop];
-                        }},
-                        defineProperty: function(target, prop, descriptor) {{
-                            if (prop === 'btoa' || prop === 'atob') {{
-                                if ('value' in descriptor) {{
-                                    customProps[prop] = descriptor.value;
-                                }}
-                                return true;
-                            }}
-                            return Reflect.defineProperty(target, prop, descriptor);
-                        }}
-                    }};
-                    
-                    const proxy = new Proxy(window, handler);
-                    
-                    return (function(code) {{
-                        with(proxy) {{
-                            return eval(code);
-                        }}
-                    }}).call(proxy, {json.dumps(expression)});
-                }})()
-                """
-                return await orig_evaluate(sandbox_expr, *args, **kwargs)
-            raise
-            
-    page.evaluate = patched_evaluate
 
 @logger.catch
 async def execute_browser_tasks(headless: bool = True):
@@ -135,7 +67,6 @@ async def execute_browser_tasks(headless: bool = True):
     ) as browser:
         # Initialize or reuse existing browser page
         page = browser.pages[0] if browser.pages else await browser.new_page()
-        _patch_page_evaluate(page)  # 👈 [夏娃注入] 给登录页面打补丁
         logger.debug("Browser initialized successfully")
 
         # Handle Epic Games authentication
@@ -147,7 +78,6 @@ async def execute_browser_tasks(headless: bool = True):
         # Execute a free games collection on new page
         logger.debug("Starting free games collection process")
         game_page = await browser.new_page()
-        _patch_page_evaluate(game_page)  # 👈 [夏娃注入] 给领游戏页面打补丁
         agent = EpicAgent(game_page)
         await agent.collect_epic_games()
         logger.debug("Free games collection completed")
