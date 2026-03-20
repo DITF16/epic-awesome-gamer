@@ -306,7 +306,7 @@ class EpicGames:
 
             # 4. 黑名单检查：只有这些情况绝对不能点
             # 如果是 'IN LIBRARY', 'OWNED', 'UNAVAILABLE', 'COMING SOON' -> 跳过
-            if any(s in btn_text_upper for s in ["IN LIBRARY", "OWNED", "UNAVAILABLE", "COMING SOON"]):
+            if any(s in btn_text_upper for s in ["IN LIBRARY", "OWNED", "UNAVAILABLE", "COMING SOON", "REQUIRES BASE GAME", "BASE GAME"]):
                 logger.success(f"Game status is '{btn_text}' - Skipping.")
                 continue
 
